@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Статистика</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%20100%20100%22%3E%3Ctext%20y%3D%22.9em%22%20font-size%3D%2290%22%3E%F0%9F%A7%A0%3C/text%3E%3C/svg%3E">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="wrap">
+        <div class="nav">
+            <a href="/" class="brand"><span class="brand-icon">🧠</span> тренажёр</a>
+            <div class="nav-links">
+                <a href="/practice">практика</a>
+                <a href="/admin">словарь</a>
+                <a href="/stats" class="active">статистика</a>
+            </div>
+        </div>
+
+        <h1>Статистика</h1>
+
+        {% if not by_category %}
+            <div class="card">
+                <p class="empty-state">
+                    Пока нет ни одной попытки.<br>
+                    Статистика появится после первых проверок ответов в
+                    <a href="/practice">практике</a>.
+                </p>
+            </div>
+        {% else %}
+            <div class="category-section">
+                <h2>По категориям</h2>
+                <div class="card">
+                    {% for s in by_category %}
+                        <div class="stat-row">
+                            <span>
+                                {{ s.category }} — {{ s.total }} попыток
+                                {% if s.skipped %}<span class="stat-skipped">({{ s.skipped }} пропущено)</span>{% endif %}
+                            </span>
+                            <span class="stat-accuracy {% if s.accuracy >= 70 %}good{% elif s.accuracy < 40 %}bad{% endif %}">
+                                {{ s.accuracy }}%
+                            </span>
+                        </div>
+                    {% endfor %}
+                </div>
+            </div>
+
+            {% for cat, words in hardest.items() %}
+                {% if words %}
+                    <div class="category-section">
+                        <h2>Сложнее всего — {{ cat }}</h2>
+                        <div class="table-scroll">
+                            <table>
+                                <tr>
+                                    <th>Слово</th>
+                                    <th>Перевод</th>
+                                    <th>Ошибок</th>
+                                    <th>Пропусков</th>
+                                    <th>Всего попыток</th>
+                                </tr>
+                                {% for w in words %}
+                                <tr>
+                                    <td>{{ w.question }}</td>
+                                    <td>{{ w.answer }}</td>
+                                    <td>{{ w.incorrect }}</td>
+                                    <td>{{ w.skipped }}</td>
+                                    <td>{{ w.total }}</td>
+                                </tr>
+                                {% endfor %}
+                            </table>
+                        </div>
+                    </div>
+                {% endif %}
+            {% endfor %}
+        {% endif %}
+    </div>
+</body>
+</html>

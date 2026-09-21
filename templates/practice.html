@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Практика — {{ current_category }}</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%20100%20100%22%3E%3Ctext%20y%3D%22.9em%22%20font-size%3D%2290%22%3E%F0%9F%A7%A0%3C/text%3E%3C/svg%3E">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="wrap">
+        <div class="nav">
+            <a href="/" class="brand"><span class="brand-icon">🧠</span> тренажёр</a>
+            <div class="nav-links">
+                <a href="/practice" class="active">практика</a>
+                <a href="/admin">словарь</a>
+                <a href="/stats">статистика</a>
+            </div>
+        </div>
+
+        <div class="tabs">
+            {% for cat in categories %}
+                {% if cat == current_category %}
+                    <a href="/practice?category={{ cat }}" class="active">{{ cat }}</a>
+                {% else %}
+                    <a href="/practice?category={{ cat }}">{{ cat }}</a>
+                {% endif %}
+            {% endfor %}
+        </div>
+
+        <div class="practice-controls">
+            <div class="reverse-toggle">
+                {% if reverse %}
+                    <a href="/practice?category={{ current_category }}&reverse=0&difficulty={{ current_difficulty }}">↺ обратное направление</a>
+                {% else %}
+                    <a href="/practice?category={{ current_category }}&reverse=1&difficulty={{ current_difficulty }}">↻ сменить направление</a>
+                {% endif %}
+            </div>
+
+            <div class="difficulty-filter">
+                <a href="/practice?category={{ current_category }}&reverse={{ reverse }}&difficulty="
+                   class="{% if not current_difficulty %}active{% endif %}">все</a>
+                {% for d in difficulties %}
+                    <a href="/practice?category={{ current_category }}&reverse={{ reverse }}&difficulty={{ d }}"
+                       class="{% if current_difficulty == d %}active{% endif %}">{{ d }}</a>
+                {% endfor %}
+            </div>
+        </div>
+
+        {% if not word %}
+            <div class="card">
+                <p class="empty-state">
+                    {% if current_difficulty %}
+                        В категории «{{ current_category }}» нет слов уровня «{{ current_difficulty }}».<br>
+                        <a href="/practice?category={{ current_category }}&reverse={{ reverse }}&difficulty=">Показать все уровни</a>
+                    {% else %}
+                        В категории «{{ current_category }}» пока нет слов.<br>
+                        <a href="/admin">Добавь их в редакторе</a>.
+                    {% endif %}
+                </p>
+            </div>
+
+        {% else %}
+            <div class="card" id="practice-card">
+                <div class="question">
+                    {% if reverse %}{{ word_answer_primary }}{% else %}{{ word.question }}{% endif %}
+                </div>
+
+                {% if not reverse and word.extra %}
+                    <p class="transcription">{{ word.extra }}</p>
+                {% endif %}
+
+                {% if translate_url %}
+                    <div class="external-links">
+                        <a href="{{ translate_url }}" target="_blank" rel="noopener">Google Translate</a>
+                        <a href="{{ reverso_url }}" target="_blank" rel="noopener">Reverso Context</a>
+                    </div>
+                {% endif %}
+
+                <form class="answer-form" method="get" action="/practice">
+                    <input type="hidden" name="category" value="{{ current_category }}">
+                    <input type="hidden" name="reverse" value="{{ reverse }}">
+                    <input type="hidden" name="difficulty" value="{{ current_difficulty }}">
+                    <input type="hidden" name="check_id" value="{{ word.id }}">
+                    <input type="hidden" name="just_answered" value="1">
+                    <input type="text" name="check_answer" placeholder="Твой ответ"
+                           value="{{ checked_answer }}" autocomplete="off" autofocus>
+                    <div class="answer-form-actions">
+                        <button type="submit" class="btn-secondary answer-form-submit">Проверить</button>
+                        {% if hint and result is none %}
+                            <button type="button" class="btn-secondary hint-button" id="hint-button"
+                                    data-hint="{{ hint }}">Подсказка</button>
+                        {% endif %}
+                    </div>
+                    {% if hint and result is none %}
+                        <div class="hint-text" id="hint-text"></div>
+                    {% endif %}
+                </form>
+
+                {% if result is not none %}
+                    {% if result %}
+                        <p class="result-line good">Верно.</p>
+                        {% if all_answers|length > 1 %}
+                            <p class="all-answers">Все варианты: {{ all_answers|join(" · ") }}</p>
+                        {% endif %}
+                    {% else %}
+                        <p class="result-line bad">
+                            Неверно. Правильный ответ:
+                            {% if reverse %}{{ word.question }}{% else %}{{ word_answer_primary }}{% endif %}
+                        </p>
+                        {% if not reverse and all_answers|length > 1 %}
+                            <p class="all-answers">Все варианты: {{ all_answers|join(" · ") }}</p>
+                        {% endif %}
+
+                        {% if not reverse and checked_answer %}
+                            <form method="post" action="/practice/accept" class="accept-form">
+                                <input type="hidden" name="word_id" value="{{ word.id }}">
+                                <input type="hidden" name="category" value="{{ current_category }}">
+                                <input type="hidden" name="reverse" value="{{ reverse }}">
+                                <input type="hidden" name="difficulty" value="{{ current_difficulty }}">
+                                <input type="hidden" name="user_answer" value="{{ checked_answer }}">
+                                <button type="submit" class="btn-secondary">
+                                    Засчитать «{{ checked_answer }}» как верный ответ
+                                </button>
+                            </form>
+                        {% endif %}
+                    {% endif %}
+                {% endif %}
+
+                <div class="practice-footer">
+                    <form method="post" action="/practice/skip" class="inline" id="skip-form">
+                        <input type="hidden" name="word_id" value="{{ word.id }}">
+                        <input type="hidden" name="reverse" value="{{ reverse }}">
+                        <input type="hidden" name="category" value="{{ current_category }}">
+                        <input type="hidden" name="difficulty" value="{{ current_difficulty }}">
+                        <input type="hidden" name="record" value="{{ 0 if just_answered else 1 }}">
+                        <button type="submit" class="btn-secondary">Следующее слово →</button>
+                    </form>
+                    <a href="/admin/{{ current_category }}?highlight={{ word.id }}#word-{{ word.id }}" class="edit-link">Редактировать это слово</a>
+                </div>
+
+                {% if just_answered %}
+                    <div class="auto-advance" id="auto-advance">
+                        <button type="button" id="auto-advance-btn" class="auto-advance-btn">
+                            <span class="auto-advance-btn-fill" id="auto-advance-bar"></span>
+                            <span class="auto-advance-btn-label">Следующее слово через 3с · нажми, чтобы остаться</span>
+                        </button>
+                    </div>
+                {% endif %}
+            </div>
+        {% endif %}
+    </div>
+
+    <script>
+        (function () {
+            var hintButton = document.getElementById('hint-button');
+            if (hintButton) {
+                hintButton.addEventListener('click', function () {
+                    document.getElementById('hint-text').textContent = hintButton.getAttribute('data-hint') + '…';
+                    hintButton.disabled = true;
+                });
+            }
+        })();
+    </script>
+
+    {% if just_answered %}
+    <script>
+        (function () {
+            var DURATION_MS = 3000;
+            var bar = document.getElementById('auto-advance-bar');
+            var btn = document.getElementById('auto-advance-btn');
+            var skipForm = document.getElementById('skip-form');
+            var cancelled = false;
+
+            // Полоса-заливка идёт через CSS-переход (transition) width
+            // 0% → 100%, а не покадровым JS — плавнее и дешевле по
+            // ресурсам браузера. requestAnimationFrame перед стартом
+            // нужен, чтобы браузер успел отрисовать начальное состояние
+            // (width: 0) перед тем, как применится конечное — иначе
+            // переход может "прыгнуть" сразу в конец без анимации.
+            requestAnimationFrame(function () {
+                bar.style.transitionDuration = (DURATION_MS / 1000) + 's';
+                bar.style.width = '100%';
+            });
+
+            // Клик по кнопке = "хочу остаться": останавливает заливку
+            // и переход к следующему слову не происходит. Кнопка при
+            // этом не отправляет форму сама — это просто клик-перехват.
+            btn.addEventListener('click', function () {
+                cancelled = true;
+                bar.style.transitionDuration = '0.15s';
+                bar.style.width = '0%';
+                btn.classList.add('auto-advance-btn-cancelled');
+                btn.querySelector('.auto-advance-btn-label').textContent = 'Остался на этом слове';
+                btn.disabled = true;
+            });
+
+            setTimeout(function () {
+                if (!cancelled) {
+                    skipForm.submit();
+                }
+            }, DURATION_MS);
+        })();
+    </script>
+
+    {% endif %}
+</body>
+</html>

@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Редактор словаря</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%20100%20100%22%3E%3Ctext%20y%3D%22.9em%22%20font-size%3D%2290%22%3E%F0%9F%A7%A0%3C/text%3E%3C/svg%3E">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="wrap">
+        <div class="nav">
+            <a href="/" class="brand"><span class="brand-icon">🧠</span> тренажёр</a>
+            <div class="nav-links">
+                <a href="/practice">практика</a>
+                <a href="/admin" class="active">словарь</a>
+                <a href="/stats">статистика</a>
+            </div>
+        </div>
+
+        <h1>Словарь</h1>
+
+        {% if imported is not none %}
+            <p class="import-report">
+                Добавлено новых слов: {{ imported }}.
+                {% if skipped %}Пропущено как дубликаты: {{ skipped }}.{% endif %}
+            </p>
+        {% endif %}
+
+        {% if purged is not none %}
+            <p class="import-report">Удалено пустых заглушек: {{ purged }}.</p>
+        {% endif %}
+
+        <div class="category-menu">
+            {% for cat in categories %}
+                <a href="/admin/{{ cat }}" class="category-menu-item">
+                    <span>{{ cat }}</span>
+                    <span class="count">{{ counts.get(cat, 0) }}</span>
+                </a>
+            {% endfor %}
+        </div>
+
+        <div class="add-form">
+            <h2>Добавить слово</h2>
+            <form method="post" action="/admin/add">
+                <div class="field-row">
+                    <div class="field">
+                        <label>Категория</label>
+                        <select name="category">
+                            {% for cat in categories %}
+                                <option value="{{ cat }}">{{ cat }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="field">
+                        <label>Сложность</label>
+                        <select name="difficulty">
+                            {% for d in difficulties %}
+                                <option value="{{ d }}" {% if d == "medium" %}selected{% endif %}>{{ d }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+                <div class="field">
+                    <label>Вопрос</label>
+                    <input type="text" name="question" required>
+                </div>
+                <div class="field">
+                    <label>Ответ (несколько вариантов — через ; или , )</label>
+                    <input type="text" name="answer" required>
+                </div>
+                <div class="field">
+                    <label>Пояснение (необязательно)</label>
+                    <input type="text" name="extra">
+                </div>
+                <button type="submit" class="btn-primary">Добавить</button>
+            </form>
+        </div>
+
+        <div class="add-form">
+            <h2>Загрузить список слов файлом</h2>
+            <form method="post" action="/admin/import" enctype="multipart/form-data">
+                <div class="field-row">
+                    <div class="field">
+                        <label>Категория</label>
+                        <select name="category">
+                            {% for cat in categories %}
+                                <option value="{{ cat }}" {% if cat == "english" %}selected{% endif %}>{{ cat }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="field">
+                        <label>Сложность (только для .txt — в .json берётся из файла)</label>
+                        <select name="difficulty">
+                            {% for d in difficulties %}
+                                <option value="{{ d }}" {% if d == "medium" %}selected{% endif %}>{{ d }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+                <div class="field">
+                    <label>Файл (.txt или .json)</label>
+                    <div class="file-field">
+                        <input type="file" name="file" accept=".txt,.json" required>
+                    </div>
+                    <p class="field-hint">
+                        .txt — построчно "word - перевод", сложность одна на весь файл (выбор выше).
+                        .json — список {"word", "translation", "transcription", "difficulty"}, сложность берётся из каждой записи.
+                    </p>
+                </div>
+                <button type="submit" class="btn-primary">Загрузить</button>
+            </form>
+        </div>
+
+        <div class="add-form">
+            <h2>Экспорт и обслуживание</h2>
+            <div class="maintenance-row">
+                <a href="/admin/export" class="btn-link">Выгрузить весь словарь (JSON)</a>
+                {% for cat in categories %}
+                    <a href="/admin/export?category={{ cat }}" class="btn-link">{{ cat }}.json</a>
+                {% endfor %}
+            </div>
+            <form method="post" action="/admin/purge-placeholders" class="maintenance-row"
+                  onsubmit="return confirm('Удалить все слова с пустыми переводами-заглушками (\'перевод\', \'translation\' и т.п.)?')">
+                <button type="submit" class="btn-secondary">Почистить заглушки-плейсхолдеры</button>
+            </form>
+        </div>
+    </div>
+</body>
+</html>

@@ -1,0 +1,291 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ category }} — словарь</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%20100%20100%22%3E%3Ctext%20y%3D%22.9em%22%20font-size%3D%2290%22%3E%F0%9F%A7%A0%3C/text%3E%3C/svg%3E">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="wrap">
+        <div class="nav nav-sticky">
+            <a href="/" class="brand"><span class="brand-icon">🧠</span> тренажёр</a>
+            <div class="nav-links">
+                <a href="/practice?category={{ category }}">практика</a>
+                <a href="/admin" class="active">словарь</a>
+                <a href="/stats">статистика</a>
+            </div>
+        </div>
+
+        <p class="breadcrumb"><a href="/admin">все категории</a> / {{ category }}</p>
+
+        <div class="category-toolbar">
+            <h1>{{ category }} <span class="count">({{ total }})</span></h1>
+            {% if total > 15 %}
+                <input type="text" id="row-filter" class="row-filter"
+                       placeholder="Фильтр по слову или переводу…" autocomplete="off">
+            {% endif %}
+        </div>
+
+        {% if total > 50 %}
+            <div class="pagination-controls">
+                <div class="per-page-select">
+                    <span>Показывать:</span>
+                    <a href="/admin/{{ category }}?per_page=50" class="{% if per_page == '50' %}active{% endif %}">50</a>
+                    <a href="/admin/{{ category }}?per_page=100" class="{% if per_page == '100' %}active{% endif %}">100</a>
+                    <a href="/admin/{{ category }}?per_page=all" class="{% if per_page == 'all' %}active{% endif %}">все</a>
+                </div>
+                {% if total_pages > 1 %}
+                    <div class="page-nav">
+                        {% if page > 1 %}
+                            <a href="/admin/{{ category }}?per_page={{ per_page }}&page={{ page - 1 }}">← назад</a>
+                        {% endif %}
+                        <span>страница {{ page }} из {{ total_pages }}</span>
+                        {% if page < total_pages %}
+                            <a href="/admin/{{ category }}?per_page={{ per_page }}&page={{ page + 1 }}">вперёд →</a>
+                        {% endif %}
+                    </div>
+                {% endif %}
+            </div>
+        {% endif %}
+
+        {% if words %}
+            <p class="edit-hint">Клик по строке — редактировать.</p>
+            <div class="table-scroll">
+                <table id="words-table">
+                    <tr>
+                        <th>Вопрос</th>
+                        <th>Ответ</th>
+                        <th>Пояснение</th>
+                        <th>Сложность</th>
+                        <th></th>
+                    </tr>
+                    {% for w in words %}
+                    <tr id="word-{{ w.id }}"
+                        class="word-row {% if highlight == w.id %}row-highlight{% endif %}"
+                        data-search="{{ (w.question ~ ' ' ~ w.answer)|lower }}"
+                        data-id="{{ w.id }}"
+                        data-category="{{ w.category }}"
+                        data-question="{{ w.question }}"
+                        data-answer="{{ w.answer }}"
+                        data-extra="{{ w.extra or '' }}"
+                        data-difficulty="{{ w.difficulty }}">
+                        <td class="cell-question">{{ w.question }}</td>
+                        <td class="cell-answer">{{ w.answer }}</td>
+                        <td class="cell-extra">{{ w.extra or '' }}</td>
+                        <td class="cell-difficulty">{{ w.difficulty }}</td>
+                        <td class="cell-actions">
+                            <span class="edit-indicator">✎</span>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </table>
+            </div>
+        {% else %}
+            <p class="category-empty">Пока пусто. <a href="/admin">Добавь слова здесь</a>.</p>
+        {% endif %}
+    </div>
+
+    <!-- Шаблон строки редактирования — ОДИН на всю страницу, а не
+         тысяча заранее отрисованных форм. При клике по строке она
+         подменяется этим содержимым через JS, с данными взятыми из
+         data-атрибутов той же строки — без похода на сервер.
+         ВАЖНО: тут нет <form> — <form> как прямой родитель нескольких
+         <td> внутри <tr> невалиден по спецификации HTML, браузер сам
+         "выносит" такой <form> из таблицы наружу, ломая структуру и
+         обработчики. Сохранение вместо этого собирает данные в JS и
+         отправляет через отдельную скрытую форму вне таблицы. -->
+    <template id="edit-row-template">
+        <div class="edit-panel">
+            <div class="edit-panel-grid">
+                <label class="edit-field">
+                    <span class="edit-field-label">Вопрос</span>
+                    <input type="text" name="question" required>
+                </label>
+                <label class="edit-field">
+                    <span class="edit-field-label">Ответ</span>
+                    <input type="text" name="answer" required>
+                </label>
+                <label class="edit-field">
+                    <span class="edit-field-label">Пояснение</span>
+                    <input type="text" name="extra">
+                </label>
+                <label class="edit-field edit-field-narrow">
+                    <span class="edit-field-label">Сложность</span>
+                    <select name="difficulty">
+                        {% for d in difficulties %}
+                            <option value="{{ d }}">{{ d }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+            </div>
+            <div class="edit-panel-actions">
+                <button type="button" class="btn-primary edit-save">Сохранить</button>
+                <button type="button" class="btn-secondary edit-cancel">Отмена</button>
+                <button type="button" class="btn-danger edit-delete">Удалить</button>
+            </div>
+        </div>
+    </template>
+
+    <!-- Скрытая форма редактирования — ОДНА на всю страницу, вне
+         таблицы. При сохранении JS программно заполняет её поля
+         значениями из открытой строки и отправляет обычным submit
+         (полная перезагрузка страницы, как и раньше — сервер отвечает
+         редиректом на /admin/<category> с якорем на изменённую строку). -->
+    <form method="post" id="edit-form" style="display:none">
+        <input type="hidden" name="category" id="edit-form-category">
+        <input type="hidden" name="question" id="edit-form-question">
+        <input type="hidden" name="answer" id="edit-form-answer">
+        <input type="hidden" name="extra" id="edit-form-extra">
+        <input type="hidden" name="difficulty" id="edit-form-difficulty">
+        <input type="hidden" name="per_page" value="{{ per_page }}">
+    </form>
+
+    <button type="button" id="scroll-top-btn" class="scroll-top-btn" title="Наверх">↑</button>
+
+    <!-- Скрытая форма удаления — переиспользуется для любой строки,
+         реквизиты подставляются перед сабмитом. Одна форма на всю
+         страницу вместо тысячи одинаковых. -->
+    <form method="post" id="delete-form" style="display:none">
+        <input type="hidden" name="category" id="delete-form-category">
+        <input type="hidden" name="per_page" value="{{ per_page }}">
+    </form>
+
+    <!-- Панель редактирования строки — вставляется JS-ом сюда, ВНЕ
+         таблицы. Так она не наследует min-width таблицы и всегда
+         умещается в ширину экрана независимо от того, сколько слов
+         в словаре и сколько места занимает сама таблица. -->
+    <div id="edit-overlay" class="edit-overlay"></div>
+    <div id="edit-panel-host" class="edit-panel-host"></div>
+
+    <script>
+        (function () {
+            var highlightId = {{ highlight or 'null' }};
+            if (highlightId) {
+                var row = document.getElementById('word-' + highlightId);
+                if (row) {
+                    row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+            }
+
+            // Фильтр строк на клиенте — без похода на сервер, работает
+            // мгновенно даже при большом словаре. Показывает/скрывает
+            // готовые строки таблицы (все они уже отрисованы сервером),
+            // это не подгрузка данных, а только видимость.
+            var filterInput = document.getElementById('row-filter');
+            if (filterInput) {
+                filterInput.addEventListener('input', function () {
+                    var query = filterInput.value.trim().toLowerCase();
+                    var rows = document.querySelectorAll('#words-table tr[data-search]');
+                    rows.forEach(function (row) {
+                        var matches = !query || row.getAttribute('data-search').indexOf(query) !== -1;
+                        row.style.display = matches ? '' : 'none';
+                    });
+                });
+            }
+
+            // Кнопка "наверх" — появляется только после прокрутки на
+            // заметное расстояние (чуть больше высоты экрана), чтобы не
+            // маячить на коротких списках, где и так всё видно сразу.
+            var scrollBtn = document.getElementById('scroll-top-btn');
+            window.addEventListener('scroll', function () {
+                if (window.scrollY > window.innerHeight * 0.6) {
+                    scrollBtn.classList.add('scroll-top-btn-visible');
+                } else {
+                    scrollBtn.classList.remove('scroll-top-btn-visible');
+                }
+            });
+            scrollBtn.addEventListener('click', function () {
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            });
+
+            // --- Редактирование по клику ---
+            //
+            // По умолчанию каждая строка — просто 5 <td> с текстом,
+            // без единого <input>. При клике исходная строка помечается
+            // как "открытая" (лёгкая подсветка), а поля редактирования
+            // появляются в ОТДЕЛЬНОЙ панели вне таблицы — прижатой к
+            // низу экрана (как системный share-лист на телефоне).
+            //
+            // Панель сделана независимой от таблицы намеренно: таблица
+            // держит min-width для читаемости обычных строк на любом
+            // экране (иначе текст сжимался бы до нечитаемости), но это
+            // же не даёт полям и кнопкам редактирования поместиться на
+            // узком экране, если панель — часть таблицы (colspan
+            // наследует её минимальную ширину). Вынесенная наружу
+            // панель ширину таблицы не наследует вообще — она всегда
+            // умещается в экран.
+            var table = document.getElementById('words-table');
+            var editTemplate = document.getElementById('edit-row-template');
+            var editForm = document.getElementById('edit-form');
+            var deleteForm = document.getElementById('delete-form');
+            var deleteFormCategory = document.getElementById('delete-form-category');
+            var editOverlay = document.getElementById('edit-overlay');
+            var editPanelHost = document.getElementById('edit-panel-host');
+            var activeSourceRow = null;
+
+            function closeActiveEdit() {
+                editPanelHost.innerHTML = '';
+                editOverlay.classList.remove('edit-overlay-visible');
+                if (activeSourceRow) {
+                    activeSourceRow.classList.remove('row-editing-source');
+                    activeSourceRow = null;
+                }
+            }
+
+            editOverlay.addEventListener('click', closeActiveEdit);
+
+            if (table) {
+                table.addEventListener('click', function (event) {
+                    var row = event.target.closest('.word-row');
+                    if (!row) {
+                        return;
+                    }
+                    if (activeSourceRow && activeSourceRow !== row) {
+                        closeActiveEdit();
+                    }
+                    if (row === activeSourceRow) {
+                        return;
+                    }
+
+                    row.classList.add('row-editing-source');
+                    activeSourceRow = row;
+
+                    var clone = editTemplate.content.cloneNode(true);
+                    editPanelHost.appendChild(clone);
+                    editOverlay.classList.add('edit-overlay-visible');
+                    var panel = editPanelHost.querySelector('.edit-panel');
+
+                    panel.querySelector('[name="question"]').value = row.dataset.question;
+                    panel.querySelector('[name="answer"]').value = row.dataset.answer;
+                    panel.querySelector('[name="extra"]').value = row.dataset.extra;
+                    panel.querySelector('[name="difficulty"]').value = row.dataset.difficulty;
+                    panel.querySelector('[name="question"]').focus();
+
+                    panel.querySelector('.edit-cancel').addEventListener('click', function () {
+                        closeActiveEdit();
+                    });
+
+                    panel.querySelector('.edit-save').addEventListener('click', function () {
+                        editForm.action = '/admin/edit/' + row.dataset.id;
+                        document.getElementById('edit-form-category').value = row.dataset.category;
+                        document.getElementById('edit-form-question').value = panel.querySelector('[name="question"]').value;
+                        document.getElementById('edit-form-answer').value = panel.querySelector('[name="answer"]').value;
+                        document.getElementById('edit-form-extra').value = panel.querySelector('[name="extra"]').value;
+                        document.getElementById('edit-form-difficulty').value = panel.querySelector('[name="difficulty"]').value;
+                        editForm.submit();
+                    });
+
+                    panel.querySelector('.edit-delete').addEventListener('click', function () {
+                        if (!confirm('Удалить это слово?')) return;
+                        deleteForm.action = '/admin/delete/' + row.dataset.id;
+                        deleteFormCategory.value = row.dataset.category;
+                        deleteForm.submit();
+                    });
+                });
+            }
+        })();
+    </script>
+</body>
+</html>

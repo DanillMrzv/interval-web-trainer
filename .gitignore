@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.pyc
+venv/
+.venv/
+
+# Секреты
+.env
+.env.*
+
+# логи
+*.sqlite3
+*.log
+
+# Редакторы и ОС
+.vscode/
+.idea/
+.DS_Store
+englishapp_update/
