@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Редактор словаря</title>
     <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%20100%20100%22%3E%3Ctext%20y%3D%22.9em%22%20font-size%3D%2290%22%3E%F0%9F%A7%A0%3C/text%3E%3C/svg%3E">
-    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="/static/style.css?v={{ css_version }}">
 </head>
 <body>
     <div class="wrap">
@@ -31,50 +31,48 @@
             <p class="import-report">Удалено пустых заглушек: {{ purged }}.</p>
         {% endif %}
 
+        {% if cat_status == 'created' %}
+            <p class="import-report">Словарь «{{ cat_name }}» создан.</p>
+        {% elif cat_status == 'exists' %}
+            <p class="import-report">Словарь «{{ cat_name }}» уже есть.</p>
+        {% elif cat_status == 'deleted' %}
+            <p class="import-report">Словарь «{{ cat_name }}» удалён.</p>
+        {% elif cat_status == 'not_empty' %}
+            <p class="import-report bad">В словаре «{{ cat_name }}» есть слова — удалить можно только пустой.</p>
+        {% elif cat_status == 'invalid' %}
+            <p class="import-report bad">Название не подошло: буквы, цифры, «-» и «_», до 30 символов, без служебных слов (add, edit, export…).</p>
+        {% endif %}
+
+        <div class="admin-actions">
+            <button type="button" class="btn-primary btn-compact" data-open-add-word>+ Добавить слово</button>
+        </div>
+
         <div class="category-menu">
             {% for cat in categories %}
-                <a href="/admin/{{ cat }}" class="category-menu-item">
-                    <span>{{ cat }}</span>
-                    <span class="count">{{ counts.get(cat, 0) }}</span>
-                </a>
+                <div class="category-menu-cell">
+                    <a href="/admin/{{ cat }}" class="category-menu-item">
+                        <span>{{ cat }}</span>
+                        <span class="count" data-count-for="{{ cat }}">{{ counts.get(cat, 0) }}</span>
+                    </a>
+                    {% if counts.get(cat, 0) == 0 %}
+                        <form method="post" action="/admin/categories/delete" class="category-delete-form"
+                              data-delete-for="{{ cat }}"
+                              onsubmit="return confirm('Удалить этот пустой словарь?')">
+                            <input type="hidden" name="name" value="{{ cat }}">
+                            <button type="submit" class="category-delete" title="Удалить пустой словарь">×</button>
+                        </form>
+                    {% endif %}
+                </div>
             {% endfor %}
         </div>
 
         <div class="add-form">
-            <h2>Добавить слово</h2>
-            <form method="post" action="/admin/add">
-                <div class="field-row">
-                    <div class="field">
-                        <label>Категория</label>
-                        <select name="category">
-                            {% for cat in categories %}
-                                <option value="{{ cat }}">{{ cat }}</option>
-                            {% endfor %}
-                        </select>
-                    </div>
-                    <div class="field">
-                        <label>Сложность</label>
-                        <select name="difficulty">
-                            {% for d in difficulties %}
-                                <option value="{{ d }}" {% if d == "medium" %}selected{% endif %}>{{ d }}</option>
-                            {% endfor %}
-                        </select>
-                    </div>
-                </div>
-                <div class="field">
-                    <label>Вопрос</label>
-                    <input type="text" name="question" required>
-                </div>
-                <div class="field">
-                    <label>Ответ (несколько вариантов — через ; или , )</label>
-                    <input type="text" name="answer" required>
-                </div>
-                <div class="field">
-                    <label>Пояснение (необязательно)</label>
-                    <input type="text" name="extra">
-                </div>
-                <button type="submit" class="btn-primary">Добавить</button>
+            <h2>Новый словарь</h2>
+            <form method="post" action="/admin/categories/add" class="inline-form">
+                <input type="text" name="name" placeholder="Например: docker" maxlength="30" required autocomplete="off">
+                <button type="submit" class="btn-secondary btn-compact">Создать</button>
             </form>
+            <p class="field-hint">Буквы, цифры, «-» и «_», до 30 символов. Пробелы заменятся на «-».</p>
         </div>
 
         <div class="add-form">
@@ -82,7 +80,7 @@
             <form method="post" action="/admin/import" enctype="multipart/form-data">
                 <div class="field-row">
                     <div class="field">
-                        <label>Категория</label>
+                        <label>Словарь</label>
                         <select name="category">
                             {% for cat in categories %}
                                 <option value="{{ cat }}" {% if cat == "english" %}selected{% endif %}>{{ cat }}</option>
@@ -126,5 +124,19 @@
             </form>
         </div>
     </div>
+
+    {% include "_add_modal.html" %}
+
+    <script>
+        // После добавления слова через всплывающее окно обновляем счётчики
+        // в меню на месте — без перезагрузки и без перехода в список слов
+        document.addEventListener('word-added', function (event) {
+            var data = event.detail;
+            var counter = document.querySelector('[data-count-for="' + data.category + '"]');
+            if (counter) counter.textContent = data.count;
+            var del = document.querySelector('[data-delete-for="' + data.category + '"]');
+            if (del) del.remove();
+        });
+    </script>
 </body>
 </html>

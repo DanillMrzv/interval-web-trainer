@@ -1,3 +1,4 @@
+import random
 import sqlite3
 
 import os
@@ -77,9 +78,117 @@ def init_db():
         # Заполняем status для уже существующих строк на основе старого correct,
         # чтобы прежняя статистика не потерялась при переходе на новую схему
         conn.execute("UPDATE attempts SET status = CASE WHEN correct = 1 THEN 'correct' ELSE 'incorrect' END WHERE status IS NULL")
+    if "shown_text" not in attempts_columns:
+        # Что именно было показано как вопрос в момент проверки (конкретный
+        # вариант из question/answer, если у слова их несколько) — без этого
+        # по одной попытке в БД нельзя понять, что именно человек видел.
+        conn.execute("ALTER TABLE attempts ADD COLUMN shown_text TEXT")
+    if "typed_answer" not in attempts_columns:
+        # Что именно ввёл пользователь — для анализа опечаток/близких
+        # промахов, а не только факта "верно/неверно".
+        conn.execute("ALTER TABLE attempts ADD COLUMN typed_answer TEXT")
+
+    if "favorite" not in words_columns:
+        # Избранное: 1 — слово чаще выпадает в тренажёре (см. /practice в main.py)
+        conn.execute("ALTER TABLE words ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0")
+
+    # Таблица словарей (категорий). Раньше список категорий был зашит в
+    # main.py — теперь он живёт в базе, чтобы словари можно было
+    # создавать из интерфейса.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS categories (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE
+        )
+    """)
+    has_categories = conn.execute("SELECT COUNT(*) AS n FROM categories").fetchone()["n"] > 0
+    if not has_categories:
+        # Первый запуск после обновления: заводим прежние четыре словаря
+        conn.executemany(
+            "INSERT OR IGNORE INTO categories (name) VALUES (?)",
+            [(name,) for name in DEFAULT_CATEGORIES],
+        )
+    # Любая категория, у которой уже есть слова, обязана существовать в списке —
+    # иначе слова "потеряются" из меню (например, если словарь создан вручную в БД).
+    conn.execute(
+        "INSERT OR IGNORE INTO categories (name) SELECT DISTINCT category FROM words ORDER BY category"
+    )
 
     conn.commit()
     conn.close()
+
+
+# --- Словари (категории) ---
+
+DEFAULT_CATEGORIES = ["english", "python", "linux", "sql"]
+
+# Имена, которые нельзя использовать как название словаря: они совпадают
+# с путями /admin/<что-то> и перехватывались бы соответствующими роутами.
+RESERVED_CATEGORY_NAMES = {"add", "edit", "delete", "import", "export", "purge-placeholders", "categories"}
+
+MAX_CATEGORY_LEN = 30
+
+
+def normalize_category_name(raw: str) -> str | None:
+    """
+    Приводит введённое название словаря к безопасному виду: нижний
+    регистр, пробелы → "-". Разрешены буквы (в том числе русские),
+    цифры, "_" и "-", длина до 30. Иначе возвращает None.
+    Название попадает в URL (/admin/<name>, ?category=<name>), поэтому
+    спецсимволы вроде &, #, ?, / запрещены заранее.
+    """
+    import re
+
+    name = re.sub(r"\s+", "-", (raw or "").strip().lower())
+    if not name or len(name) > MAX_CATEGORY_LEN:
+        return None
+    if not re.fullmatch(r"[\w-]+", name):
+        return None
+    if name in RESERVED_CATEGORY_NAMES:
+        return None
+    return name
+
+
+def get_categories() -> list[str]:
+    """Список словарей в порядке создания."""
+    conn = get_connection()
+    rows = conn.execute("SELECT name FROM categories ORDER BY id").fetchall()
+    conn.close()
+    return [r["name"] for r in rows]
+
+
+def add_category(raw_name: str) -> tuple[str | None, str]:
+    """
+    Создаёт новый словарь. Возвращает (имя, статус), где статус:
+    'created' — создан; 'exists' — такой уже есть; 'invalid' — имя не
+    прошло проверку (тогда имя None).
+    """
+    name = normalize_category_name(raw_name)
+    if name is None:
+        return None, "invalid"
+    conn = get_connection()
+    cur = conn.execute("INSERT OR IGNORE INTO categories (name) VALUES (?)", (name,))
+    conn.commit()
+    created = cur.rowcount > 0
+    conn.close()
+    return name, "created" if created else "exists"
+
+
+def delete_category(name: str) -> bool:
+    """
+    Удаляет словарь, только если в нём нет слов — чтобы случайным
+    кликом нельзя было снести накопленное. Возвращает True, если удалён.
+    """
+    conn = get_connection()
+    n = conn.execute("SELECT COUNT(*) AS n FROM words WHERE category = ?", (name,)).fetchone()["n"]
+    if n:
+        conn.close()
+        return False
+    cur = conn.execute("DELETE FROM categories WHERE name = ?", (name,))
+    conn.commit()
+    deleted = cur.rowcount > 0
+    conn.close()
+    return deleted
 
 
 def get_all_words():
@@ -90,15 +199,70 @@ def get_all_words():
     return rows
 
 
-def get_words_by_category(category: str, difficulty: str | None = None, limit: int | None = None, offset: int = 0):
+def _difficulty_list(difficulty) -> list[str]:
+    """
+    Приводит фильтр сложности к списку: None/"" → [] (все уровни),
+    строка → [строка], список/кортеж → как есть. Так одни и те же
+    функции принимают и один уровень, и несколько сразу.
+    """
+    if not difficulty:
+        return []
+    if isinstance(difficulty, str):
+        return [difficulty]
+    return list(difficulty)
+
+
+def get_words_for_practice(category: str, difficulty=None):
+    """
+    То же самое, что get_words_by_category, но с двумя добавленными
+    полями на каждое слово — times_shown (сколько раз вообще
+    показывалось, любой исход) и times_wrong (сколько раз из них
+    ответили неверно). Отдельная функция, а не изменение
+    get_words_by_category — та используется ещё и в админке, где эта
+    статистика не нужна и только замедлила бы запрос лишним JOIN.
+
+    Используется в main.pick_random_word для выбора следующего слова:
+    слова, которые показывались реже (или вообще ни разу), и слова,
+    в которых чаще ошибались, должны получать больше веса — эти два
+    числа как раз и дают на чём считать такой вес.
+    """
+    conn = get_connection()
+    query = """
+        SELECT
+            w.*,
+            COALESCE(s.times_shown, 0) AS times_shown,
+            COALESCE(s.times_wrong, 0) AS times_wrong
+        FROM words w
+        LEFT JOIN (
+            SELECT
+                word_id,
+                COUNT(*) AS times_shown,
+                SUM(CASE WHEN status = 'incorrect' THEN 1 ELSE 0 END) AS times_wrong
+            FROM attempts
+            GROUP BY word_id
+        ) s ON s.word_id = w.id
+        WHERE w.category = ?
+    """
+    params: list = [category]
+    levels = _difficulty_list(difficulty)
+    if levels:
+        query += f" AND w.difficulty IN ({','.join('?' * len(levels))})"
+        params.extend(levels)
+    query += " ORDER BY w.id"
+    rows = conn.execute(query, params).fetchall()
+    conn.close()
+    return rows
+
+
+def get_words_by_category(category: str, difficulty=None, limit: int | None = None, offset: int = 0):
     """
     Возвращает слова нужной категории — нужно для /practice и для
     страницы редактирования категории в админке. Отсортированы по id
     (порядок добавления) — важно для админки: без стабильного порядка
     строки "прыгали" бы местами между запросами, и подсветка/переход
     к соседней строке после удаления не имели бы смысла.
-    Если difficulty указан (easy/medium/hard) — возвращает только
-    слова этого уровня; иначе — все уровни вместе.
+    difficulty — один уровень (easy/medium/hard) или список уровней
+    (например, ["easy", "medium"]); пусто — все уровни вместе.
     limit/offset — для постраничной выдачи в админке при большом
     словаре; /practice их не передаёт (там нужны все слова сразу,
     чтобы выбрать случайное).
@@ -106,9 +270,10 @@ def get_words_by_category(category: str, difficulty: str | None = None, limit: i
     conn = get_connection()
     query = "SELECT * FROM words WHERE category = ?"
     params: list = [category]
-    if difficulty:
-        query += " AND difficulty = ?"
-        params.append(difficulty)
+    levels = _difficulty_list(difficulty)
+    if levels:
+        query += f" AND difficulty IN ({','.join('?' * len(levels))})"
+        params.extend(levels)
     query += " ORDER BY id"
     if limit is not None:
         query += " LIMIT ? OFFSET ?"
@@ -118,18 +283,16 @@ def get_words_by_category(category: str, difficulty: str | None = None, limit: i
     return rows
 
 
-def count_words_by_category(category: str, difficulty: str | None = None) -> int:
+def count_words_by_category(category: str, difficulty=None) -> int:
     """Считает слова в категории (с опциональным фильтром сложности) — для пагинации."""
     conn = get_connection()
-    if difficulty:
-        row = conn.execute(
-            "SELECT COUNT(*) AS n FROM words WHERE category = ? AND difficulty = ?",
-            (category, difficulty),
-        ).fetchone()
-    else:
-        row = conn.execute(
-            "SELECT COUNT(*) AS n FROM words WHERE category = ?", (category,)
-        ).fetchone()
+    query = "SELECT COUNT(*) AS n FROM words WHERE category = ?"
+    params: list = [category]
+    levels = _difficulty_list(difficulty)
+    if levels:
+        query += f" AND difficulty IN ({','.join('?' * len(levels))})"
+        params.extend(levels)
+    row = conn.execute(query, params).fetchone()
     conn.close()
     return row["n"]
 
@@ -143,14 +306,16 @@ def get_word(word_id: int):
 
 
 def add_word(category: str, question: str, answer: str, extra: str = "", difficulty: str = "medium"):
-    """Добавляет новое слово/задание в базу."""
+    """Добавляет новое слово/задание в базу и возвращает его id."""
     conn = get_connection()
-    conn.execute(
+    cur = conn.execute(
         "INSERT INTO words (category, question, answer, extra, difficulty) VALUES (?, ?, ?, ?, ?)",
         (category, question, answer, extra, difficulty or "medium"),
     )
     conn.commit()
+    new_id = cur.lastrowid
     conn.close()
+    return new_id
 
 
 def update_word(word_id: int, category: str, question: str, answer: str, extra: str = "", difficulty: str = "medium"):
@@ -170,6 +335,23 @@ def delete_word(word_id: int):
     conn.execute("DELETE FROM words WHERE id = ?", (word_id,))
     conn.commit()
     conn.close()
+
+
+def toggle_favorite(word_id: int) -> bool | None:
+    """
+    Переключает флаг "избранное" у слова и возвращает новое состояние
+    (True — теперь в избранном). None, если слова с таким id нет.
+    """
+    conn = get_connection()
+    row = conn.execute("SELECT favorite FROM words WHERE id = ?", (word_id,)).fetchone()
+    if row is None:
+        conn.close()
+        return None
+    new_value = 0 if row["favorite"] else 1
+    conn.execute("UPDATE words SET favorite = ? WHERE id = ?", (new_value, word_id))
+    conn.commit()
+    conn.close()
+    return bool(new_value)
 
 
 def get_neighbor_word_id(word_id: int, category: str) -> int | None:
@@ -294,42 +476,75 @@ def is_correct_answer(user_input: str, answer_field: str) -> bool:
     return key in {_normalize_for_comparison(a) for a in split_answers(answer_field)}
 
 
-def add_alternative_answer(word_id: int, new_variant: str):
+def _add_variant(word_id: int, column: str, new_variant: str):
     """
-    Добавляет новый вариант перевода к существующему слову, если его
-    там ещё нет (сравнение без учёта регистра). Используется в тренажёре,
-    когда пользователь ответил "неверно", но хочет засчитать свой
-    вариант как альтернативный перевод.
+    Общая логика для add_alternative_answer/add_alternative_question:
+    добавляет новый вариант в поле question или answer, если такого
+    варианта там ещё нет (сравнение без учёта регистра). column должен
+    быть "question" или "answer" — имя жёстко проверяется, а не
+    подставляется напрямую в SQL, чтобы не открыть SQL-инъекцию через
+    построение запроса с f-строкой.
     """
+    if column not in ("question", "answer"):
+        raise ValueError("column must be 'question' or 'answer'")
     word = get_word(word_id)
     if word is None:
         return
-    variants = split_answers(word["answer"])
+    variants = split_answers(word[column])
     if new_variant.strip().lower() not in {v.lower() for v in variants}:
         variants.append(new_variant.strip())
     updated = f" {ANSWER_SEP} ".join(variants)
     conn = get_connection()
-    conn.execute("UPDATE words SET answer = ? WHERE id = ?", (updated, word_id))
+    conn.execute(f"UPDATE words SET {column} = ? WHERE id = ?", (updated, word_id))
     conn.commit()
     conn.close()
 
 
+def add_alternative_answer(word_id: int, new_variant: str):
+    """
+    Добавляет новый вариант перевода (answer) к существующему слову.
+    Используется в тренажёре в обычном направлении, когда пользователь
+    ответил "неверно", но хочет засчитать свой перевод как верный.
+    """
+    _add_variant(word_id, "answer", new_variant)
+
+
+def add_alternative_question(word_id: int, new_variant: str):
+    """
+    Добавляет новый вариант исходного слова (question) — например,
+    если в словаре записано "seller → продавец", а пользователь в
+    реверс-режиме ввёл "salesman", это тоже верно: добавляем
+    "salesman" вторым принимаемым вариантом question, чтобы дальше
+    оба слова засчитывались как правильный ответ на "продавец"
+    (аналогично metro/tube/underground для одного и того же перевода).
+    """
+    _add_variant(word_id, "question", new_variant)
+
+
 # --- Статистика попыток ---
 
-def record_attempt(word_id: int, status: str, reverse: bool):
+def record_attempt(word_id: int, status: str, reverse: bool, shown_text: str | None = None, typed_answer: str | None = None):
     """
-    Сохраняет одну попытку — сырые данные для статистики.
-    status: 'correct' / 'incorrect' / 'skipped'.
-    'skipped' пишется, когда пользователь переходит к следующему
-    слову, не отправив проверку ответа (см. /practice/skip в main.py).
+    Сохраняет одну попытку — сырые данные для статистики и дальнейшего
+    анализа. status: 'correct' / 'incorrect' / 'skipped'. 'skipped'
+    пишется, когда пользователь переходит к следующему слову, не
+    отправив проверку ответа (см. /practice/skip в main.py).
+
+    shown_text — какой именно вариант вопроса был показан (если у
+    слова несколько синонимов через ; или ,), typed_answer — что
+    именно ввёл пользователь. Оба необязательны (для 'skipped'
+    осмысленного typed_answer нет) — нужны, чтобы потом можно было
+    посмотреть не только "верно/неверно", но и что конкретно человек
+    печатал, вплоть до опечаток.
+
     Поле correct тоже заполняется (1 для correct, иначе 0) — только
     для совместимости со старым кодом, если он где-то ещё читает
     это поле напрямую; новый код всегда должен использовать status.
     """
     conn = get_connection()
     conn.execute(
-        "INSERT INTO attempts (word_id, correct, reverse, status) VALUES (?, ?, ?, ?)",
-        (word_id, int(status == "correct"), int(reverse), status),
+        "INSERT INTO attempts (word_id, correct, reverse, status, shown_text, typed_answer) VALUES (?, ?, ?, ?, ?, ?)",
+        (word_id, int(status == "correct"), int(reverse), status, shown_text, typed_answer),
     )
     conn.commit()
     conn.close()
@@ -694,3 +909,36 @@ def purge_placeholder_answers(category: str | None = None) -> int:
         conn.commit()
     conn.close()
     return len(to_delete)
+
+
+# --- Интересные факты (баннер на главной) ---
+#
+# Пока это просто фиксированный список для обкатки фичи — темы вперемешку
+# (английский/python/linux/sql/общее), без привязки к конкретному словарю.
+# Если приживётся, можно будет перенести в таблицу в БД и добавить
+# управление через админку, как со словами — но это уже следующий шаг.
+FACTS = [
+    "Python назван не в честь змеи, а в честь британского комедийного шоу «Monty Python's Flying Circus» — Гвидо ван Россум был его фанатом.",
+    "Первый компьютерный «баг» был в буквальном смысле насекомым: в 1947 году в реле гарвардского Mark II нашли застрявшую моль.",
+    "Команда ls в Unix изначально задумывалась как «list», но её сократили — на телетайпах 1970-х каждое лишнее нажатие клавиши стоило времени.",
+    "SQL изначально назывался SEQUEL (Structured English Query Language), но название пришлось сократить из-за торговой марки другой компании.",
+    "Ядро Linux сегодня весит больше 30 миллионов строк кода, а первая версия 1991 года умещалась в несколько тысяч строк.",
+    "Слово «робот» придумал не инженер, а писатель — чешский драматург Карел Чапек ввёл его в пьесе 1920 года.",
+    "В английском языке буква E встречается чаще всех остальных — поэтому частотный анализ при взломе простых шифров начинают именно с неё.",
+    "Первая версия HTML, придуманная Тимом Бернерсом-Ли в 1991 году, содержала всего 18 тегов.",
+    "Слово «computer» до середины XX века означало не машину, а человека — так называли людей, которые вручную считали вычисления.",
+    "Git был написан Линусом Торвальдсом всего за пару недель в 2005 году — как экстренная замена коммерческой системе BitKeeper.",
+    "В базах данных NULL — это не «ноль» и не «пусто», а буквально «неизвестно»; поэтому выражение NULL = NULL возвращает не TRUE, а тоже NULL.",
+    "Слово «byte» придумали специально непохожим на «bit» — чтобы их не путали на слух при разговоре или по телефону.",
+    "Название оболочки bash — каламбур: Bourne-Again SHell, отсылка и к автору более раннего sh (Стивену Борну), и к выражению «born again».",
+    "Самый первый в мире веб-сайт, info.cern.ch, до сих пор работает и доступен по своему оригинальному адресу.",
+    "В английском языке больше слов начинается на букву S, чем на любую другую букву алфавита.",
+    "Флаг --force в git — не волшебная кнопка «исправить всё», а буквально «перезаписать историю, не спрашивая»: им легко случайно затереть чужие коммиты.",
+    "Термин «cookie» для веб-браузеров придумали по аналогии со старым программистским понятием «magic cookie» — небольшим куском данных, которым обменивались программы.",
+    "Слово «despite» и предлог «spite» исторически не связаны с обидой напрямую — оба восходят к латинскому «despicere», «смотреть свысока».",
+]
+
+
+def random_fact() -> str:
+    """Случайный факт для баннера на главной странице."""
+    return random.choice(FACTS)
