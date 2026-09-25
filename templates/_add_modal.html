@@ -1,0 +1,128 @@
+{# Всплывающее окно «Добавить слово» — общее для /admin и /admin/<словарь>.
+   Открывается любым элементом с атрибутом data-open-add-word
+   (необязательный data-category — какой словарь выбрать по умолчанию).
+   Отправка идёт через fetch: страница остаётся на месте, окно
+   закрывается, а остальной странице сообщается событие "word-added". #}
+<div id="add-modal" class="modal-overlay">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="add-modal-title">
+        <div class="modal-header">
+            <h2 id="add-modal-title">Добавить слово</h2>
+            <button type="button" class="modal-close" aria-label="Закрыть">×</button>
+        </div>
+        <form id="add-word-form" method="post" action="/admin/add" autocomplete="off">
+            <div class="field-row">
+                <div class="field">
+                    <label>Словарь</label>
+                    <select name="category">
+                        {% for cat in categories %}
+                            <option value="{{ cat }}" {% if cat == current_category %}selected{% endif %}>{{ cat }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="field">
+                    <label>Сложность</label>
+                    <select name="difficulty">
+                        {% for d in difficulties %}
+                            <option value="{{ d }}" {% if d == "medium" %}selected{% endif %}>{{ d }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+            <div class="field">
+                <label>Вопрос (несколько синонимов — через ; или , )</label>
+                <input type="text" name="question" required>
+            </div>
+            <div class="field">
+                <label>Ответ (несколько вариантов — через ; или , )</label>
+                <input type="text" name="answer" required>
+            </div>
+            <div class="field">
+                <label>Пояснение (необязательно)</label>
+                <input type="text" name="extra">
+            </div>
+            <p class="form-error" id="add-word-error"></p>
+            <div class="modal-actions">
+                <button type="submit" class="btn-primary">Добавить</button>
+                <button type="button" class="btn-secondary modal-cancel">Отмена</button>
+            </div>
+        </form>
+    </div>
+</div>
+<div id="toast" class="toast" role="status"></div>
+
+<script>
+    (function () {
+        var overlay = document.getElementById('add-modal');
+        var form = document.getElementById('add-word-form');
+        var errorBox = document.getElementById('add-word-error');
+        var toast = document.getElementById('toast');
+        var submitBtn = form.querySelector('button[type="submit"]');
+        var toastTimer = null;
+        var defaultCategory = form.elements['category'].value;
+
+        function showToast(text) {
+            toast.textContent = text;
+            toast.classList.add('toast-visible');
+            clearTimeout(toastTimer);
+            toastTimer = setTimeout(function () { toast.classList.remove('toast-visible'); }, 2500);
+        }
+
+        function openModal(category) {
+            form.reset();
+            errorBox.textContent = '';
+            form.elements['category'].value = category || defaultCategory;
+            overlay.classList.add('modal-open');
+            document.body.classList.add('modal-lock');
+            setTimeout(function () { form.elements['question'].focus(); }, 0);
+        }
+
+        function closeModal() {
+            overlay.classList.remove('modal-open');
+            document.body.classList.remove('modal-lock');
+        }
+
+        document.addEventListener('click', function (event) {
+            var trigger = event.target.closest('[data-open-add-word]');
+            if (trigger) {
+                event.preventDefault();
+                openModal(trigger.getAttribute('data-category'));
+            }
+        });
+        overlay.addEventListener('click', function (event) {
+            if (event.target === overlay) closeModal();
+        });
+        overlay.querySelector('.modal-close').addEventListener('click', closeModal);
+        overlay.querySelector('.modal-cancel').addEventListener('click', closeModal);
+        document.addEventListener('keydown', function (event) {
+            if (event.key === 'Escape' && overlay.classList.contains('modal-open')) closeModal();
+        });
+
+        form.addEventListener('submit', function (event) {
+            event.preventDefault();
+            errorBox.textContent = '';
+            submitBtn.disabled = true;
+
+            fetch('/admin/add', {
+                method: 'POST',
+                headers: { 'Accept': 'application/json' },
+                body: new FormData(form)
+            })
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
+                    if (data.ok) {
+                        closeModal();
+                        showToast('Добавлено: ' + data.word.question + ' → ' + data.category);
+                        document.dispatchEvent(new CustomEvent('word-added', { detail: data }));
+                    } else if (data.status === 'duplicate') {
+                        errorBox.textContent = 'Такое слово уже есть в этом словаре.';
+                    } else {
+                        errorBox.textContent = 'Заполни вопрос и ответ.';
+                    }
+                })
+                .catch(function () {
+                    errorBox.textContent = 'Не получилось добавить. Проверь соединение и попробуй ещё раз.';
+                })
+                .then(function () { submitBtn.disabled = false; });
+        });
+    })();
+</script>

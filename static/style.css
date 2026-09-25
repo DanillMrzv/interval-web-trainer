@@ -154,6 +154,8 @@ h2 {
     border-radius: 6px;
     padding: 4px;
     width: fit-content;
+    max-width: 100%;
+    flex-wrap: wrap;
 }
 
 .tabs a {
@@ -174,6 +176,67 @@ h2 {
     color: var(--text);
 }
 
+/* ---------- Баннер с фактом (главная) ---------- */
+
+.fact-banner {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    max-width: 560px;
+    margin-top: 8px;
+    padding: 16px 18px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--bg-raised);
+}
+
+.fact-icon {
+    flex-shrink: 0;
+    font-size: 18px;
+    line-height: 1.5;
+}
+
+.fact-text {
+    flex: 1;
+    margin: 0;
+    font-size: 14px;
+    line-height: 1.5;
+    color: var(--text-dim);
+    transition: opacity 0.15s ease;
+}
+
+.fact-text-fading {
+    opacity: 0.35;
+}
+
+.fact-refresh {
+    flex-shrink: 0;
+    width: 28px;
+    min-width: 0;
+    height: 28px;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: transparent;
+    color: var(--text-dim);
+    font-size: 15px;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.fact-refresh:hover {
+    color: var(--text);
+    border-color: var(--text);
+}
+
+.fact-refresh:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
 /* ---------- Карточка практики ---------- */
 
 .card {
@@ -182,6 +245,7 @@ h2 {
     padding: 40px 32px;
     background: var(--bg-raised);
     text-align: center;
+    position: relative;
 }
 
 .reverse-toggle {
@@ -211,6 +275,18 @@ h2 {
     font-style: italic;
 }
 
+/* Пояснение: размыто, пока не кликнешь */
+.explain-hidden {
+    filter: blur(6px);
+    cursor: pointer;
+    user-select: none;
+    transition: filter 0.2s ease;
+}
+
+.explain {
+    transition: filter 0.2s ease;
+}
+
 .answer-form input[type="text"] {
     width: 100%;
     background: var(--bg);
@@ -231,24 +307,34 @@ h2 {
 
 .answer-form-actions {
     display: flex;
+    justify-content: center;
     gap: 8px;
     margin-bottom: 12px;
 }
 
-.answer-form-submit {
-    flex: 1;
-    padding: 10px 16px;
-    font-size: 14px;
+/* Компактные кнопки — «Проверить», «Подсказка» и т.п. Один размер на всех,
+   чтобы ни одна не выбивалась из общего вида. */
+.btn-compact {
+    padding: 8px 18px;
+    font-size: 13px;
 }
 
-.hint-button {
-    font-size: 14px;
-    flex-shrink: 0;
-}
-
-.hint-button:disabled {
+.btn-compact:disabled {
     opacity: 0.5;
     cursor: default;
+}
+
+/* Зона обратной связи: подсказка (до ответа) и результат (после)
+   рендерятся в одном и том же месте с общей минимальной высотой —
+   переключение между ними не меняет высоту карточки. Высота рассчитана
+   на самый частый "двухстрочный" случай (строка результата + строка
+   со всеми вариантами); flex+center — чтобы более короткое содержимое
+   не липло к верхнему краю зоны, а стояло по центру зарезервированного места. */
+.feedback-zone {
+    min-height: 70px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
 }
 
 .hint-text {
@@ -305,7 +391,7 @@ button, .btn, .btn-primary, .btn-secondary, .btn-danger, .btn-link {
 }
 
 .result-line {
-    margin-top: 20px;
+    margin-top: 0;
     font-size: 15px;
 }
 
@@ -396,24 +482,34 @@ button, .btn, .btn-primary, .btn-secondary, .btn-danger, .btn-link {
     border-bottom: 1px dashed var(--border);
 }
 
-.auto-advance {
-    margin-top: 20px;
+/* Кнопка «дальше»: в обычном состоянии и в режиме автоперехода — одна и та же
+   кнопка одного размера, поэтому карточка не меняет высоту. */
+.skip-form {
+    display: block;
+    width: 100%;
+    max-width: 320px;
 }
 
-.auto-advance-btn {
+.next-btn {
     position: relative;
     display: block;
     width: 100%;
+    height: 42px;
     overflow: hidden;
     border: 1px solid var(--border);
     border-radius: 8px;
-    background: var(--bg-raised);
-    padding: 13px 20px;
+    background: transparent;
+    color: var(--text);
+    padding: 0 16px;
     cursor: pointer;
     font-family: inherit;
 }
 
-.auto-advance-btn-fill {
+.next-btn:hover {
+    border-color: var(--text);
+}
+
+.next-btn-fill {
     position: absolute;
     top: 0;
     left: 0;
@@ -424,28 +520,45 @@ button, .btn, .btn-primary, .btn-secondary, .btn-danger, .btn-link {
     transition-timing-function: linear;
 }
 
-.auto-advance-btn-label {
+.next-btn-label {
     position: relative;
     z-index: 1;
+    display: block;
     font-size: 13px;
     font-weight: 500;
+    line-height: 40px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Избранное — небольшая «таблетка» в углу карточки */
+.fav-btn {
+    position: absolute;
+    top: 14px;
+    right: 14px;
+    padding: 5px 11px;
+    font-size: 12px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    background: transparent;
+    line-height: 1.2;
+}
+
+.fav-btn:hover {
+    border-color: var(--text);
     color: var(--text);
 }
 
-.auto-advance-btn:hover {
-    border-color: var(--text);
+.fav-btn.fav-on {
+    color: #facc15;
+    border-color: rgba(250, 204, 21, 0.5);
 }
 
-.auto-advance-btn-cancelled {
+.fav-btn:disabled {
+    opacity: 0.6;
     cursor: default;
-}
-
-.auto-advance-btn-cancelled .auto-advance-btn-fill {
-    background: transparent;
-}
-
-.auto-advance-btn-cancelled .auto-advance-btn-label {
-    color: var(--text-dim);
 }
 
 .empty-state {
@@ -663,6 +776,12 @@ form.inline {
     font-size: 13px;
 }
 
+.stats-note {
+    margin: 0 0 12px 0;
+    font-size: 13px;
+    color: var(--text-dim);
+}
+
 .category-empty {
     color: var(--text-dim);
     font-size: 13px;
@@ -678,20 +797,47 @@ form.inline {
     margin-bottom: 32px;
 }
 
-.category-menu-item {
+.category-menu-cell {
     display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 16px 18px;
     border: 1px solid var(--border);
     border-radius: 10px;
     background: var(--bg-raised);
-    border-bottom: 1px solid var(--border);
-    font-size: 15px;
+    overflow: hidden;
 }
 
-.category-menu-item:hover {
+.category-menu-cell:hover {
     border-color: var(--text);
+}
+
+.category-menu-item {
+    flex: 1;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    padding: 16px 18px;
+    border-bottom: none;
+    font-size: 15px;
+    min-width: 0;
+}
+
+.category-delete-form {
+    display: flex;
+    margin: 0;
+}
+
+.category-delete {
+    border-radius: 0;
+    border-left: 1px solid var(--border);
+    padding: 0 14px;
+    color: var(--text-dim);
+    font-size: 18px;
+    line-height: 1;
+}
+
+.category-delete:hover {
+    color: var(--bad);
+    background: rgba(248, 113, 113, 0.1);
 }
 
 .category-menu-item .count {
@@ -965,6 +1111,150 @@ form.inline {
     }
 }
 
+/* ---------- Кнопки-действия, форма нового словаря ---------- */
+
+.admin-actions {
+    margin: 0 0 20px 0;
+}
+
+.toolbar-actions {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.inline-form {
+    display: flex;
+    gap: 8px;
+}
+
+.inline-form input[type="text"] {
+    flex: 1;
+    min-width: 0;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-family: inherit;
+    font-size: 14px;
+    padding: 9px 12px;
+    border-radius: 8px;
+}
+
+.inline-form input[type="text"]:focus {
+    outline: none;
+    border-color: var(--text);
+}
+
+.import-report.bad {
+    color: var(--bad);
+}
+
+/* ---------- Всплывающее окно «Добавить слово» ---------- */
+
+.modal-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    z-index: 40;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+}
+
+.modal-overlay.modal-open {
+    display: flex;
+}
+
+body.modal-lock {
+    overflow: hidden;
+}
+
+.modal {
+    width: 100%;
+    max-width: 480px;
+    max-height: 100%;
+    overflow-y: auto;
+    background: var(--bg-raised);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 22px;
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.5);
+}
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 16px;
+}
+
+.modal-header h2 {
+    margin: 0;
+    color: var(--text);
+}
+
+.modal-close {
+    padding: 0 6px;
+    font-size: 22px;
+    line-height: 1;
+    color: var(--text-dim);
+}
+
+.modal-close:hover {
+    color: var(--text);
+}
+
+.modal label {
+    display: block;
+    font-size: 12px;
+    color: var(--text-dim);
+    margin-bottom: 6px;
+}
+
+.form-error {
+    color: var(--bad);
+    font-size: 13px;
+    margin: 0 0 12px 0;
+    min-height: 0;
+}
+
+.form-error:empty {
+    display: none;
+}
+
+.modal-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.modal-actions button {
+    flex: 1;
+}
+
+.toast {
+    position: fixed;
+    left: 50%;
+    bottom: 24px;
+    transform: translate(-50%, 12px);
+    max-width: calc(100% - 32px);
+    background: var(--text);
+    color: var(--bg);
+    font-size: 13px;
+    padding: 10px 16px;
+    border-radius: 8px;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease, transform 0.2s ease;
+    z-index: 50;
+}
+
+.toast.toast-visible {
+    opacity: 1;
+    transform: translate(-50%, 0);
+}
+
 /* ---------- Статистика ---------- */
 
 .stat-row {
@@ -1008,7 +1298,7 @@ form.inline {
     }
 
     .card {
-        padding: 28px 18px;
+        padding: 48px 18px 28px 18px;
     }
 
     .nav {
